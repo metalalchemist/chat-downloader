@@ -2135,10 +2135,10 @@ class YouTubeChatDownloader(BaseChatDownloader):
 
             for video in islice(vids, max_vids_to_try):
                 video_id = video['video_id']
-
-                if video['video_type'] not in ('LIVE', 'UPCOMING'):
+                debug_log(video)
+                if video['video_type'] != 'LIVE':
                     log('debug',
-                        f'Skipping video with ID: "{video_id}" (not live/upcoming)')
+                        f'Skipping video with ID: "{video_id}" (not live)')
                     continue
 
                 if video_id in list_of_vids_to_ignore:
