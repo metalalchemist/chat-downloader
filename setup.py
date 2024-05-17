@@ -20,7 +20,8 @@ requirements = [
     'isodate',
     'docstring-parser',
     'colorlog',
-    'websocket-client'
+    'websocket-client',
+    'afreeca'
 ]
 
 setup(

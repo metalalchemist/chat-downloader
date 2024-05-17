@@ -2,7 +2,8 @@
 
 from .youtube import YouTubeChatDownloader
 from .twitch import TwitchChatDownloader
-from .zoom import ZoomChatDownloader
+from .chzzk import ChzzkChatDownloader
+from .afreeca import AfreecaChatDownloader
 from .common import BaseChatDownloader
 
 
