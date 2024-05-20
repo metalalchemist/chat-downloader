@@ -180,14 +180,12 @@ class ChzzkChatDownloader(BaseChatDownloader):
                     continue
 
                 try:
-                    chat_msg['profile'] = json.loads(chat_msg['profile']) if chat_msg['profile'] else {}
+                    chat_msg['profile'] = json.loads(chat_msg['profile']) if chat_msg.get('profile') else {}
                     display_name = chat_msg['profile'].get('nickname', '')
-                    if chat_msg[userId] == 'anonymous':
-                        display_name = ''
-                        chat_msg[userId] = ''
 
-                    chat_msg['extras'] = json.loads(chat_msg['extras'])
+                    chat_msg['extras'] = json.loads(chat_msg['extras']) if chat_msg.get('extras') else {}
                     emotes = chat_msg['extras'].get('emojis')
+                    pay_amount = chat_msg['extras'].get('payAmount')
 
                     data = {}
                     data['timestamp'] = chat_msg[msgTime] * 1000
@@ -200,6 +198,8 @@ class ChzzkChatDownloader(BaseChatDownloader):
                     }
                     if emotes:
                         data['emotes'] = emotes
+                    if pay_amount:
+                        data['pay_amount'] = pay_amount
 
                     message_count += 1
                     yield data
