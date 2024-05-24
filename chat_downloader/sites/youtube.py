@@ -2124,50 +2124,41 @@ class YouTubeChatDownloader(BaseChatDownloader):
 
         list_of_vids_to_ignore = params.get('ignore') or []
 
-        sleep_amount = 30  # params.get('retry_timeout')
         # For efficiency purposes, do not loop over all past broadcasts if not found
         max_vids_to_try = 5
 
-        while True:
+        vids = self.get_user_videos(
+            **user_video_args, video_type='live', params=params)
 
-            vids = self.get_user_videos(
-                **user_video_args, video_type='live', params=params)
+        for video in islice(vids, max_vids_to_try):
+            video_id = video['video_id']
+            debug_log(video)
+            if video['video_type'] != 'LIVE':
+                log('debug',
+                    f'Skipping video with ID: "{video_id}" (not live)')
+                continue
 
-            for video in islice(vids, max_vids_to_try):
-                video_id = video['video_id']
-                debug_log(video)
-                if video['video_type'] != 'LIVE':
-                    log('debug',
-                        f'Skipping video with ID: "{video_id}" (not live)')
-                    continue
+            if video_id in list_of_vids_to_ignore:
+                log('debug', f'Skipping video with ID: "{video_id}"')
+                continue
 
-                if video_id in list_of_vids_to_ignore:
-                    log('debug', f'Skipping video with ID: "{video_id}"')
-                    continue
+            try:
+                chat = self.get_chat_by_video_id(video_id, params)
 
-                try:
-                    chat = self.get_chat_by_video_id(video_id, params)
+                log('info',
+                    f"Found a livestream: \"{video['title']}\" ({video_id}).")
 
-                    log('info',
-                        f"Found a livestream: \"{video['title']}\" ({video_id}).")
+                for key, value in vars(chat).items():  # Update chat item
+                    if key != 'chat' and not key.startswith('_'):
+                        setattr(chat_item, key, value)
 
-                    for key, value in vars(chat).items():  # Update chat item
-                        if key != 'chat' and not key.startswith('_'):
-                            setattr(chat_item, key, value)
+                yield from chat
+                break
 
-                    yield from chat
-                    break
-
-                except ChatDownloaderError as e:
-                    # For some reason, doesn't work
-                    log('warning',
-                        f"Unable to get chat for \"{video['title']}\" ({video_id}) due to an error: \"{e}\"")
-
-            log('info',
-                f'There are no active or upcoming livestreams with a live chat. Retrying in {sleep_amount} seconds.')
-            interruptible_sleep(sleep_amount)
-
-            # continue forever, until reaching a video with valid chat
+            except ChatDownloaderError as e:
+                # For some reason, doesn't work
+                log('warning',
+                    f"Unable to get chat for \"{video['title']}\" ({video_id}) due to an error: \"{e}\"")
 
     def get_chat_by_video_id(self, video_id, params):
         """Get chat messages for a YouTube video, given its ID.
