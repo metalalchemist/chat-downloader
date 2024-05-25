@@ -21,6 +21,9 @@ import json
 from hashlib import sha256
 from requests.exceptions import RequestException
 from json.decoder import JSONDecodeError
+from threading import Thread, Event
+
+# NOTE: https://github.com/kimcore/chzzk/blob/main/src/chat/chat.ts
 
 
 class ChzzkChatWSS:
@@ -28,11 +31,18 @@ class ChzzkChatWSS:
         'ping': 0,
         'pong': 10000,
         'connect': 100,
+        'connected': 10100,
         'send_chat': 3101,
         'request_recent_chat': 5101,
         'response_recent_chat': 15101,
+        'event': 93006,
         'chat': 93101,
-        # 'donation': 93102,
+        'donation': 93102,
+        'kick': 94005,
+        'block': 94006,
+        'blind': 94008,
+        'notice': 94010,
+        'penalty': 94015,
     }
 
     def __init__(self, channel_id: str, access_token: str, timeout=5):
@@ -40,6 +50,9 @@ class ChzzkChatWSS:
         self.accTkn = access_token
         self.timeout = timeout
         self.num_connect = 0
+        self.server_id = sum([ord(c) for c in self.cid]) % 9 + 1
+        self._keep_alive_thread = None
+        self._close_event = Event()
 
         self.connect()
 
@@ -49,7 +62,7 @@ class ChzzkChatWSS:
         self.set_timeout(self.timeout)
 
         # start connection
-        self.socket.connect('wss://kr-ss1.chat.naver.com/chat')
+        self.socket.connect(f'wss://kr-ss{self.server_id}.chat.naver.com/chat')
 
         send_dict = {
             "ver": "2",
@@ -77,11 +90,22 @@ class ChzzkChatWSS:
         }
         self.send(send_dict)
 
-        if self.socket.connected:
-            log('debug', 'Chzzk websocket connected successfully...')
-            self.num_connect += 1
-        else:
+        if not self.socket.connected:
             raise SiteError('Chzzk websocket connection failed!')
+
+        log('debug', 'Chzzk websocket connected successfully...')
+        self.num_connect += 1
+
+        if not self._keep_alive_thread:
+            self._keep_alive_thread = Thread(target=self._keep_alive, daemon=True)
+            self._keep_alive_thread.start()
+
+    def _keep_alive(self):
+        while not self._close_event.wait(20.0):
+            try:
+                self.send({'ver': '2', 'cmd': self.CHAT_CMD['ping']})
+            except:
+                pass
 
     def send(self, obj):
         self.socket.send(json.dumps(obj))
@@ -94,6 +118,10 @@ class ChzzkChatWSS:
 
     def close_connection(self):
         self.socket.close()
+
+    def close(self):
+        self._close_event.set()
+        self.close_connection()
 
 
 class ChzzkChatDownloader(BaseChatDownloader):
@@ -149,8 +177,10 @@ class ChzzkChatDownloader(BaseChatDownloader):
                     continue
 
                 if raw_msg.get('cmd') == socket.CHAT_CMD['ping']:
-                    socket.send({"ver": "2", "cmd": socket.CHAT_CMD['pong']})
-                    yield {}
+                    socket.send({'ver': '2', 'cmd': socket.CHAT_CMD['pong']})
+                    continue
+
+                if raw_msg.get('cmd') == socket.CHAT_CMD['pong']:
                     continue
 
                 if socket.num_connect > 1 and raw_msg.get('cmd') == socket.CHAT_CMD['response_recent_chat']:
@@ -179,7 +209,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
                     userId = 'uid' if 'uid' in chat_msg else 'userId'
 
                     # System messages
-                    if chat_msg.get(msgTypeCode) == 30:
+                    if chat_msg.get(msgTypeCode) in (30, 121,):
                         continue
                     if 'profile' not in chat_msg and 'extras' not in chat_msg:
                         continue
@@ -214,7 +244,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
                         log('error', e)
 
         finally:
-            socket.close_connection()
+            socket.close()
 
     def _get_chat_by_channel_id(self, match, params):
         return self.get_chat_by_channel_id(match.group('channel_id'), params)
