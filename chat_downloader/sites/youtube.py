@@ -1973,6 +1973,7 @@ class YouTubeChatDownloader(BaseChatDownloader):
             else:
                 # otherwise, is live, so keep trying
                 log('debug', 'No actions to process.')
+                yield {}
 
             # assume there are no more chat continuations
             no_continuation = True

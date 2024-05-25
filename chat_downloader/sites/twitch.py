@@ -1636,7 +1636,7 @@ class TwitchChatDownloader(BaseChatDownloader):
                         last_ping_time = current_time
 
                 except socket.timeout:
-                    pass  # Allows for keyboard interrupts
+                    yield {}
 
                 except ConnectionError:
                     # Close old connection
@@ -1671,7 +1671,7 @@ class TwitchChatDownloader(BaseChatDownloader):
             raise UserNotFound(f'Unable to find user: "{stream_id}"')
 
         is_live = multi_get(stream_info, 'stream', 'type') == 'live'
-        channel_id = multi_get(stream_info, 'channel', 'id')
+        # channel_id = multi_get(stream_info, 'channel', 'id')
         title = multi_get(stream_info, 'lastBroadcast',
                           'title') if is_live else stream_id
 

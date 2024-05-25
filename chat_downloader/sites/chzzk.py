@@ -13,8 +13,7 @@ from ..utils.core import (
 )
 
 from ..debugging import (
-    log,
-    debug_log
+    log
 )
 
 import websocket
@@ -36,7 +35,7 @@ class ChzzkChatWSS:
         # 'donation': 93102,
     }
 
-    def __init__(self, channel_id: str, access_token: str, timeout=60):
+    def __init__(self, channel_id: str, access_token: str, timeout=5):
         self.cid = channel_id
         self.accTkn = access_token
         self.timeout = timeout
@@ -79,7 +78,7 @@ class ChzzkChatWSS:
         self.send(send_dict)
 
         if self.socket.connected:
-            debug_log('Chzzk websocket connected successfully...')
+            log('debug', 'Chzzk websocket connected successfully...')
             self.num_connect += 1
         else:
             raise SiteError('Chzzk websocket connection failed!')
@@ -127,89 +126,95 @@ class ChzzkChatDownloader(BaseChatDownloader):
         return
 
     def _get_chat_messages_by_channel_id(self, chat_channel_id, chat_access_token, params):
-        socket = ChzzkChatWSS(channel_id=chat_channel_id, access_token=chat_access_token)
+        socket = ChzzkChatWSS(channel_id=chat_channel_id,
+                              access_token=chat_access_token,
+                              timeout=params.get('message_receive_timeout'))
         message_count = 0
-        while True:
-            try:
-                raw_msg = socket.recv()
-            except KeyboardInterrupt:
-                break
-            except Exception as e:
-                log('error', e)
-
-                live_info = self._session_get_json(self._LIVE_DETAIL_URL.format(
-                    channel_id=params.get('channel_id')))['content']
-                if live_info['status'] != self._STATUS_OPEN:
+        try:
+            while True:
+                try:
+                    raw_msg = socket.recv()
+                except KeyboardInterrupt:
                     break
 
-                socket.connect()
-                raw_msg = socket.recv()
-
-            if raw_msg.get('cmd') == socket.CHAT_CMD['ping']:
-                socket.send({"ver": "2", "cmd": socket.CHAT_CMD['pong']})
-                continue
-
-            if socket.num_connect > 1 and raw_msg.get('cmd') == socket.CHAT_CMD['response_recent_chat']:
-                debug_log('Not the first connection, so the response of recent chat will be ignored...')
-                continue
-
-            if "bdy" not in raw_msg:
-                continue
-
-            raw_body = raw_msg['bdy']
-            if isinstance(raw_body, list):
-                chat_msgs = raw_body
-            elif isinstance(raw_body, dict):
-                chat_msgs = raw_body.get('messageList', [raw_body])
-            else:
-                continue
-
-            for chat_msg in chat_msgs:
-                if 'msgTime' not in chat_msg and 'messageTime' not in chat_msg:
+                except websocket._exceptions.WebSocketTimeoutException as e:
+                    yield {}
                     continue
-
-                msgTime = 'msgTime' if 'msgTime' in chat_msg else 'messageTime'
-                msg = 'msg' if 'msg' in chat_msg else 'content'
-                msgTypeCode = 'msgTypeCode' if 'msgTypeCode' in chat_msg else 'messageTypeCode'
-                userId = 'uid' if 'uid' in chat_msg else 'userId'
-
-                # System messages
-                if chat_msg.get(msgTypeCode) == 30:
-                    continue
-                if 'profile' not in chat_msg and 'extras' not in chat_msg:
-                    continue
-
-                try:
-                    chat_msg['profile'] = json.loads(chat_msg['profile']) if chat_msg.get('profile') else {}
-                    display_name = chat_msg['profile'].get('nickname', '')
-
-                    chat_msg['extras'] = json.loads(chat_msg['extras']) if chat_msg.get('extras') else {}
-                    emotes = chat_msg['extras'].get('emojis')
-                    pay_amount = chat_msg['extras'].get('payAmount')
-
-                    data = {}
-                    data['timestamp'] = chat_msg[msgTime] * 1000
-                    data['message_id'] = sha256(json.dumps(chat_msg, sort_keys=True).encode('utf8')).hexdigest()
-                    data['message'] = chat_msg[msg]
-                    data['message_type'] = str(chat_msg[msgTypeCode])
-                    data['author'] = {
-                        'display_name': display_name,
-                        'id': chat_msg[userId],
-                    }
-                    if emotes:
-                        data['emotes'] = emotes
-                    if pay_amount:
-                        data['pay_amount'] = pay_amount
-
-                    message_count += 1
-                    yield data
-                    log('debug', f'Total number of messages: {message_count}')
 
                 except Exception as e:
                     log('error', e)
+
+                    socket.close_connection()
+                    socket.connect()
                     continue
 
-        socket.close_connection()
+                if raw_msg.get('cmd') == socket.CHAT_CMD['ping']:
+                    socket.send({"ver": "2", "cmd": socket.CHAT_CMD['pong']})
+                    yield {}
+                    continue
+
+                if socket.num_connect > 1 and raw_msg.get('cmd') == socket.CHAT_CMD['response_recent_chat']:
+                    log('debug', 'Not the first connection, so the response of recent chat will be ignored...')
+                    yield {}
+                    continue
+
+                if "bdy" not in raw_msg:
+                    continue
+
+                raw_body = raw_msg['bdy']
+                if isinstance(raw_body, list):
+                    chat_msgs = raw_body
+                elif isinstance(raw_body, dict):
+                    chat_msgs = raw_body.get('messageList', [raw_body])
+                else:
+                    continue
+
+                for chat_msg in chat_msgs:
+                    if 'msgTime' not in chat_msg and 'messageTime' not in chat_msg:
+                        continue
+
+                    msgTime = 'msgTime' if 'msgTime' in chat_msg else 'messageTime'
+                    msg = 'msg' if 'msg' in chat_msg else 'content'
+                    msgTypeCode = 'msgTypeCode' if 'msgTypeCode' in chat_msg else 'messageTypeCode'
+                    userId = 'uid' if 'uid' in chat_msg else 'userId'
+
+                    # System messages
+                    if chat_msg.get(msgTypeCode) == 30:
+                        continue
+                    if 'profile' not in chat_msg and 'extras' not in chat_msg:
+                        continue
+
+                    try:
+                        chat_msg['profile'] = json.loads(chat_msg['profile']) if chat_msg.get('profile') else {}
+                        display_name = chat_msg['profile'].get('nickname', '')
+
+                        chat_msg['extras'] = json.loads(chat_msg['extras']) if chat_msg.get('extras') else {}
+                        emotes = chat_msg['extras'].get('emojis')
+                        pay_amount = chat_msg['extras'].get('payAmount')
+
+                        data = {}
+                        data['timestamp'] = chat_msg[msgTime] * 1000
+                        data['message_id'] = sha256(json.dumps(chat_msg, sort_keys=True).encode('utf8')).hexdigest()
+                        data['message'] = chat_msg[msg]
+                        data['message_type'] = str(chat_msg[msgTypeCode])
+                        data['author'] = {
+                            'display_name': display_name,
+                            'id': chat_msg[userId],
+                        }
+                        if emotes:
+                            data['emotes'] = emotes
+                        if pay_amount:
+                            data['pay_amount'] = pay_amount
+
+                        message_count += 1
+                        yield data
+                        log('debug', f'Total number of messages: {message_count}')
+
+                    except Exception as e:
+                        log('error', e)
+
+        finally:
+            socket.close_connection()
 
     def _get_chat_by_channel_id(self, match, params):
         return self.get_chat_by_channel_id(match.group('channel_id'), params)

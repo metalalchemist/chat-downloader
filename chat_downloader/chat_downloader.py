@@ -108,7 +108,7 @@ class ChatDownloader():
                  ignore=None,
 
                  # Twitch
-                 message_receive_timeout=0.1,
+                 message_receive_timeout=5,
                  buffer_size=4096
                  ):
         """Used to get chat messages from a livestream, video, clip or past broadcast.
@@ -170,7 +170,7 @@ class ChatDownloader():
         :param ignore: Ignore a list of video ids, defaults to None
         :type ignore: list, optional
         :param message_receive_timeout: Time before requesting for new messages,
-            defaults to 0.1
+            defaults to 5
         :type message_receive_timeout: float, optional
         :param buffer_size: Specify a buffer size for retrieving messages,
             defaults to 4096

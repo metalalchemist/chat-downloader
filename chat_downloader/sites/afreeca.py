@@ -8,11 +8,11 @@ from ..debugging import (
 )
 import asyncio
 import json
+import queue
 
 from afreeca import AfreecaTV, Chat as AfreecaChat, UserCredential
 from afreeca.exceptions import NotStreamingError
 from datetime import datetime, timezone
-from queue import Queue
 from threading import Thread
 from hashlib import sha256
 
@@ -33,7 +33,7 @@ class AfreecaChatDownloader(BaseChatDownloader):
     _DEFAULT_ID = 'playsquad'
     _DEFAULT_PW = 'g17JNU]}bI2}n$p'
 
-    queue = Queue()
+    queue = queue.Queue()
 
     async def _chat_callback(self, chat: AfreecaChat):
         data = {
@@ -52,29 +52,38 @@ class AfreecaChatDownloader(BaseChatDownloader):
 
         self.queue.put(data)
 
-    def _get_chat_messages(self):
-        self.loop.create_task(self.chat_loader.loop())
-        Thread(target=self.loop.run_forever, daemon=True).start()
-        message_count = 0
+    def afreeca_chat_recv_loop(self):
+        self.loop.run_until_complete(self.chat_loader.loop())
+        self.loop.close()
+        log('debug', 'Async event loop closed...')
+
+    def _get_chat_messages(self, params):
         try:
+            Thread(target=self.afreeca_chat_recv_loop).start()
+            message_count = 0
             while True:
-                data = self.queue.get()
+                try:
+                    data = self.queue.get(timeout=params.get('message_receive_timeout'))
+                except queue.Empty:
+                    yield {}
+                    continue
+
                 message_count += 1
                 yield data
                 log('debug', f'Total number of messages: {message_count}')
         except Exception as e:
             log('error', e)
         finally:
-            log('debug', 'start cleanup!')
+            log('debug', 'Cleanup afreeca chat downloader')
             self.chat_loader.remove_callback(self._chat_callback)
-            self.loop.stop()
+            self.loop.create_task(self.close_all_aiohttp_connections())
 
     def _get_empty_generator(self):
         yield {}
         return
 
     def _get_chat(self, match, params):
-        self.loop = asyncio.get_event_loop()
+        self.loop = asyncio.new_event_loop()
         chat = self.loop.run_until_complete(self.get_chat_by_username(match.group('username'), params))
         return chat
 
@@ -83,9 +92,12 @@ class AfreecaChatDownloader(BaseChatDownloader):
             await self.chat_loader.credential._session.close()
         if self.chat_loader.session:
             await self.chat_loader.session.close()
+        if self.chat_loader.keepalive_task:
+            self.chat_loader.keepalive_task.cancel()
         if self.chat_loader.connection:
-            await self.chat_loader.connection.close()
+            client_websocket_response = self.chat_loader.connection
             self.chat_loader.connection = None
+            await client_websocket_response.close()
 
     async def get_chat_by_username(self, username, params):
         cred = await UserCredential.login(params.get('afreeca-id', self._DEFAULT_ID), params.get('afreeca-pw', self._DEFAULT_PW))
@@ -98,7 +110,7 @@ class AfreecaChatDownloader(BaseChatDownloader):
             await self.chat_loader.connect()
             bj_info = self.chat_loader.info
             return Chat(
-                self._get_chat_messages(),
+                self._get_chat_messages(params),
                 title=bj_info.title,
                 duration=None,
                 status='live',
@@ -107,8 +119,7 @@ class AfreecaChatDownloader(BaseChatDownloader):
             )
 
         except NotStreamingError:
-            if cred._session:
-                await cred._session.close()
+            await self.close_all_aiohttp_connections()
             return Chat(
                 self._get_empty_generator(),
                 title='',
