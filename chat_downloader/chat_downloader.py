@@ -85,7 +85,7 @@ class ChatDownloader():
                  end_time=None,
                  max_attempts=15,
                  retry_timeout=None,
-                 interruptible_retry=True,
+                 interruptible_retry=False,
                  timeout=None,
                  inactivity_timeout=None,
                  max_messages=None,
@@ -130,7 +130,7 @@ class ChatDownloader():
             (use exponential backoff, i.e. immediate, 1s, 2s, 4s, 8s, ...)
         :type retry_timeout: float, optional
         :param interruptible_retry: Have the option to skip waiting and
-            immediately retry. Defaults to True
+            immediately retry. Defaults to False
         :type interruptible_retry: bool, optional
         :param timeout: Stop retrieving chat after a certain duration
             (in seconds), defaults to None

@@ -585,7 +585,7 @@ class BaseChatDownloader:
         return new_dict
 
     @staticmethod
-    def retry(attempt_number, max_attempts=1, error=None, retry_timeout=None, text=None, interruptible_retry=True, **kwargs):
+    def retry(attempt_number, max_attempts=1, error=None, retry_timeout=None, text=None, interruptible_retry=False, **kwargs):
         """Retry to occur after an error occurs
 
         :param attempt_number: The current attempt number
