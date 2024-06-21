@@ -65,7 +65,7 @@ class ChzzkChatWSS:
         self.socket.connect(f'wss://kr-ss{self.server_id}.chat.naver.com/chat')
 
         send_dict = {
-            "ver": "2",
+            "ver": "3",
             "svcid": "game",
             "cid": self.cid,
             "cmd": self.CHAT_CMD['connect'],
@@ -103,7 +103,7 @@ class ChzzkChatWSS:
     def _keep_alive(self):
         while not self._close_event.wait(20.0):
             try:
-                self.send({'ver': '2', 'cmd': self.CHAT_CMD['ping']})
+                self.send({'ver': '3', 'cmd': self.CHAT_CMD['ping']})
             except:
                 pass
 
@@ -177,7 +177,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
                     continue
 
                 if raw_msg.get('cmd') == socket.CHAT_CMD['ping']:
-                    socket.send({'ver': '2', 'cmd': socket.CHAT_CMD['pong']})
+                    socket.send({'ver': '3', 'cmd': socket.CHAT_CMD['pong']})
                     continue
 
                 if raw_msg.get('cmd') == socket.CHAT_CMD['pong']:

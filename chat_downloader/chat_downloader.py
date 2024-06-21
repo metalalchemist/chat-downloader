@@ -349,16 +349,10 @@ def run(propagate_interrupt=False, **kwargs):
 
     try:
         chat = downloader.get_chat(**chat_params)
-
-        if kwargs.get('quiet'):  # Only check if quiet once
-            def callback(item):
-                pass
-        else:
-            def callback(item):
-                chat.print_formatted(item)
-
         for message in chat:
-            callback(message)
+            if not message:
+                continue
+            log('debug', message)
 
         log('info', 'Finished retrieving chat messages.')
 
