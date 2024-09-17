@@ -1,3 +1,5 @@
+import orjson
+
 from .common import (
     Chat,
     BaseChatDownloader,
@@ -17,111 +19,32 @@ from ..debugging import (
 )
 
 import websocket
-import json
-from hashlib import sha256
+import queue
+import rel
+
 from requests.exceptions import RequestException
 from json.decoder import JSONDecodeError
-from threading import Thread, Event
+from threading import Event
 
 # NOTE: https://github.com/kimcore/chzzk/blob/main/src/chat/chat.ts
 
-
-class ChzzkChatWSS:
-    CHAT_CMD = {
-        'ping': 0,
-        'pong': 10000,
-        'connect': 100,
-        'connected': 10100,
-        'send_chat': 3101,
-        'request_recent_chat': 5101,
-        'response_recent_chat': 15101,
-        'event': 93006,
-        'chat': 93101,
-        'donation': 93102,
-        'kick': 94005,
-        'block': 94006,
-        'blind': 94008,
-        'notice': 94010,
-        'penalty': 94015,
-    }
-
-    def __init__(self, channel_id: str, access_token: str, timeout=5):
-        self.cid = channel_id
-        self.accTkn = access_token
-        self.timeout = timeout
-        self.num_connect = 0
-        self.server_id = sum([ord(c) for c in self.cid]) % 9 + 1
-        self._keep_alive_thread = None
-        self._close_event = Event()
-
-        self.connect()
-
-    def connect(self):
-        # create new socket
-        self.socket = websocket.WebSocket()
-        self.set_timeout(self.timeout)
-
-        # start connection
-        self.socket.connect(f'wss://kr-ss{self.server_id}.chat.naver.com/chat')
-
-        send_dict = {
-            "ver": "3",
-            "svcid": "game",
-            "cid": self.cid,
-            "cmd": self.CHAT_CMD['connect'],
-            "tid": 1,
-            "bdy": {
-                "uid": None,
-                "devType": 2001,
-                "accTkn": self.accTkn,
-                "auth": "READ"
-            }
-        }
-        self.send(send_dict)
-        sock_response = self.recv()
-
-        self.sid = sock_response['bdy']['sid']
-
-        send_dict['cmd'] = self.CHAT_CMD['request_recent_chat']
-        send_dict['tid'] += 1
-        send_dict['sid'] = self.sid
-        send_dict['bdy'] = {
-            'recentMessageCount': 50
-        }
-        self.send(send_dict)
-
-        if not self.socket.connected:
-            raise SiteError('Chzzk websocket connection failed!')
-
-        log('debug', 'Chzzk websocket connected successfully...')
-        self.num_connect += 1
-
-        if not self._keep_alive_thread:
-            self._keep_alive_thread = Thread(target=self._keep_alive, daemon=True)
-            self._keep_alive_thread.start()
-
-    def _keep_alive(self):
-        while not self._close_event.wait(20.0):
-            try:
-                self.send({'ver': '3', 'cmd': self.CHAT_CMD['ping']})
-            except:
-                pass
-
-    def send(self, obj):
-        self.socket.send(json.dumps(obj))
-
-    def recv(self):
-        return json.loads(self.socket.recv())
-
-    def set_timeout(self, message_receive_timeout):
-        self.socket.settimeout(message_receive_timeout)
-
-    def close_connection(self):
-        self.socket.close()
-
-    def close(self):
-        self._close_event.set()
-        self.close_connection()
+class ChatCommands:
+    # Define command codes as class attributes
+    PING = 0
+    PONG = 10000
+    CONNECT = 100
+    CONNECTED = 10100
+    SEND_CHAT = 3101
+    REQUEST_RECENT_CHAT = 5101
+    RESPONSE_RECENT_CHAT = 15101
+    EVENT = 93006
+    CHAT = 93101
+    DONATION = 93102
+    KICK = 94005
+    BLOCK = 94006
+    BLIND = 94008
+    NOTICE = 94010
+    PENALTY = 94015
 
 
 class ChzzkChatDownloader(BaseChatDownloader):
@@ -149,107 +72,161 @@ class ChzzkChatDownloader(BaseChatDownloader):
 
     _STATUS_OPEN = "OPEN"
 
+    queue = queue.Queue()
+    event = Event()
+    cid = None
+
+    def on_message(self, ws, message):
+        raw_msg = orjson.loads(message)
+        print(raw_msg)
+        cmd = raw_msg.get('cmd')
+        if cmd == ChatCommands.CONNECTED:
+            print('connected')
+            self.sid = raw_msg['bdy']['sid']
+            self.send_json({
+                "ver": "3",
+                "svcid": "game",
+                "cid": self.cid,
+                "cmd": ChatCommands.REQUEST_RECENT_CHAT,
+                "tid": 2,
+                "sid": self.sid,
+                "bdy": {
+                    'recentMessageCount': 50
+                }
+            })
+            return
+        elif cmd == ChatCommands.PING:
+            self.send_json({'ver': '3', 'cmd': ChatCommands.PONG})
+            return
+        elif cmd == ChatCommands.PONG:
+            return
+
+        if 'bdy' not in raw_msg:
+            return
+
+        raw_body = raw_msg['bdy']
+        if isinstance(raw_body, list):
+            chat_msgs = raw_body
+        elif isinstance(raw_body, dict):
+            chat_msgs = raw_body.get('messageList', [raw_body])
+        else:
+            log('error', f'Unknown format: {raw_body}')
+            return
+
+        for chat_msg in chat_msgs:
+            if 'msgTime' not in chat_msg and 'messageTime' not in chat_msg:
+                continue
+
+            msgTime = 'msgTime' if 'msgTime' in chat_msg else 'messageTime'
+            msg = 'msg' if 'msg' in chat_msg else 'content'
+            msgTypeCode = 'msgTypeCode' if 'msgTypeCode' in chat_msg else 'messageTypeCode'
+            userId = 'uid' if 'uid' in chat_msg else 'userId'
+
+            # System messages
+            if chat_msg.get(msgTypeCode) in (30, 121,):
+                continue
+            if 'profile' not in chat_msg and 'extras' not in chat_msg:
+                continue
+
+            chat_msg['profile'] = orjson.loads(chat_msg['profile']) if chat_msg.get('profile') else {}
+            display_name = chat_msg['profile'].get('nickname', '')
+
+            chat_msg['extras'] = orjson.loads(chat_msg['extras']) if chat_msg.get('extras') else {}
+            emotes = chat_msg['extras'].get('emojis')
+            pay_amount = chat_msg['extras'].get('payAmount')
+
+            data = {}
+            data['timestamp'] = chat_msg[msgTime] * 1000
+            data['message_id'] = f'{self.cid}{chat_msg["userId"]}{chat_msg[msgTime]}'
+            data['message'] = chat_msg[msg]
+            data['message_type'] = str(chat_msg[msgTypeCode])
+            data['author'] = {
+                'display_name': display_name,
+                'id': chat_msg[userId],
+            }
+            if emotes:
+                data['emotes'] = emotes
+            if pay_amount:
+                data['pay_amount'] = pay_amount
+            self.queue.put(data)
+
+    def on_error(self, ws, error):
+        print(error)
+
+    def on_close(self, ws, close_status_code, close_msg):
+        # probably only when server requested to close
+        print("### closed ###")
+
+    def on_open(self, ws):
+        print("Opened connection")
+        self.send_json({
+            "ver": "3",
+            "svcid": "game",
+            "cid": self.cid,
+            "cmd": ChatCommands.CONNECT,
+            "tid": 1,
+            "bdy": {
+                "uid": None,
+                "devType": 2001,
+                "accTkn": self.accTkn,
+                "auth": "READ"
+            }
+        })
+
+    def send_json(self, data):
+        print(f'send: {data}')
+        self.websocket.send(orjson.dumps(data))
+
     def _get_chat_by_video_id(self, match, params):
         # TODO: vod support
         return
 
+    def abort(self):
+        rel.abort()
+        self.event.set()
+
     def _get_chat_messages_by_channel_id(self, chat_channel_id, chat_access_token, params):
-        socket = ChzzkChatWSS(channel_id=chat_channel_id,
-                              access_token=chat_access_token,
-                              timeout=params.get('message_receive_timeout'))
+        self.cid = chat_channel_id
+        self.server_id = sum([ord(c) for c in chat_channel_id]) % 9 + 1
+        self.accTkn = chat_access_token
+        self.websocket = websocket.WebSocketApp(
+            url=f'wss://kr-ss{self.server_id}.chat.naver.com/chat',
+            on_open=self.on_open,
+            on_message=self.on_message,
+            on_error=self.on_error,
+            on_close=self.on_close,
+            on_reconnect=self.on_open,
+        )
+        self.timeout = params.get('message_receive_timeout')
+        self.websocket.run_forever(
+            ping_interval=20,
+            ping_payload=orjson.dumps({}),
+            dispatcher=rel,
+        )
+        rel.signal(2, lambda: self.abort())
+        rel.dispatch()
         message_count = 0
         try:
-            while True:
+            while not self.event.is_set():
                 try:
-                    raw_msg = socket.recv()
-                except KeyboardInterrupt:
-                    break
-
-                except websocket._exceptions.WebSocketTimeoutException as e:
+                    data = self.queue.get(timeout=self.timeout)
+                except queue.Empty:
                     yield {}
                     continue
 
-                except Exception as e:
-                    log('error', e)
-
-                    socket.close_connection()
-                    socket.connect()
-                    continue
-
-                if raw_msg.get('cmd') == socket.CHAT_CMD['ping']:
-                    socket.send({'ver': '3', 'cmd': socket.CHAT_CMD['pong']})
-                    continue
-
-                if raw_msg.get('cmd') == socket.CHAT_CMD['pong']:
-                    continue
-
-                if socket.num_connect > 1 and raw_msg.get('cmd') == socket.CHAT_CMD['response_recent_chat']:
-                    log('debug', 'Not the first connection, so the response of recent chat will be ignored...')
-                    yield {}
-                    continue
-
-                if "bdy" not in raw_msg:
-                    continue
-
-                raw_body = raw_msg['bdy']
-                if isinstance(raw_body, list):
-                    chat_msgs = raw_body
-                elif isinstance(raw_body, dict):
-                    chat_msgs = raw_body.get('messageList', [raw_body])
-                else:
-                    continue
-
-                for chat_msg in chat_msgs:
-                    if 'msgTime' not in chat_msg and 'messageTime' not in chat_msg:
-                        continue
-
-                    msgTime = 'msgTime' if 'msgTime' in chat_msg else 'messageTime'
-                    msg = 'msg' if 'msg' in chat_msg else 'content'
-                    msgTypeCode = 'msgTypeCode' if 'msgTypeCode' in chat_msg else 'messageTypeCode'
-                    userId = 'uid' if 'uid' in chat_msg else 'userId'
-
-                    # System messages
-                    if chat_msg.get(msgTypeCode) in (30, 121,):
-                        continue
-                    if 'profile' not in chat_msg and 'extras' not in chat_msg:
-                        continue
-
-                    try:
-                        chat_msg['profile'] = json.loads(chat_msg['profile']) if chat_msg.get('profile') else {}
-                        display_name = chat_msg['profile'].get('nickname', '')
-
-                        chat_msg['extras'] = json.loads(chat_msg['extras']) if chat_msg.get('extras') else {}
-                        emotes = chat_msg['extras'].get('emojis')
-                        pay_amount = chat_msg['extras'].get('payAmount')
-
-                        data = {}
-                        data['timestamp'] = chat_msg[msgTime] * 1000
-                        data['message_id'] = sha256(json.dumps(chat_msg, sort_keys=True).encode('utf8')).hexdigest()
-                        data['message'] = chat_msg[msg]
-                        data['message_type'] = str(chat_msg[msgTypeCode])
-                        data['author'] = {
-                            'display_name': display_name,
-                            'id': chat_msg[userId],
-                        }
-                        if emotes:
-                            data['emotes'] = emotes
-                        if pay_amount:
-                            data['pay_amount'] = pay_amount
-
-                        message_count += 1
-                        yield data
-                        log('debug', f'Total number of messages: {message_count}')
-
-                    except Exception as e:
-                        log('error', e)
-
+                message_count += 1
+                yield data
+                log('debug', f'Total number of messages: {message_count}')
+        except Exception as e:
+            log('error', e)
         finally:
-            socket.close()
+            self.websocket.close()
 
     def _get_chat_by_channel_id(self, match, params):
         return self.get_chat_by_channel_id(match.group('channel_id'), params)
 
     def get_chat_by_channel_id(self, channel_id, params):
+        print(f'params: {params}')
         cookies = {"NID_AUT": params.get('NID_AUT', self._DEFAULT_NID_AUT),
                    "NID_SES": params.get('NID_SES', self._DEFAULT_NID_SES)}
         max_attempts = params.get('max_attempts')
