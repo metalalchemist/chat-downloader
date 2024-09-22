@@ -71,7 +71,6 @@ class ChzzkChatDownloader(BaseChatDownloader):
     _DEFAULT_NID_SES = "AAABoWkzOGZj+RIiu6C4Jakp+RdUsaMtRgLbMzO8kh5it7a34ADYVPTvZKtrw9hPNd88WgRjMbyB8+dYw00N+jJckHHo6Q9szDa7Gssw1B7jJF0KiwAi6REeaJa3sdQomN/mdrWEHqvlizYg8cKWaIgCc+evNveEoxcd8zwuRPlSorGWcg09gMPmGwhdFN+eT37sWkCY+gU3W0bbOMUsghZQ/ULUif5+Ghv2fq1gfEukHkbbdiEyRqKuhjjiFn1JNj2cb6Mc+cYBOsZOPFqJ5YuYUVYPKLxg5/jVaH++EmUWgEKonVIlL2f0mjEoIoXYEhwMT4b+iu/xo41IWA35am2RkTLu7rVwSIebVTGLL2W5DAapfUje02SZ+jyl6ynEuhHlHf5994/8IJFerfE2Nh9AhWbECzCRpSTDYaolysKQ/uvUtXxmcuUWCtrUAPZQuXWwE0jtpBUzqZjDFuTMG16EetA0b1K3RrlD2BXut1LlTyfXEyy6UgeoijDnR18X6WvamMT3LieM6Q+QOFI3lhrmYnqUEP+UoYpArIHDtAesgQuKwiai6q1ooIsvtVuAIp6Xdw=="
 
     _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-    _STATUS_OPEN = "OPEN"
 
     queue = queue.Queue()
     event = Event()
@@ -80,6 +79,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
     cookies = None
     websocket_thread = None
     timeout = 5
+    max_retries = 5
 
     def on_message(self, ws, message):
         raw_msg = orjson.loads(message)
@@ -117,7 +117,6 @@ class ChzzkChatDownloader(BaseChatDownloader):
             log('error', f'Unknown format: {raw_body}')
             return
 
-        print("5")
         for chat_msg in chat_msgs:
             message_time = chat_msg.get('messageTime') or chat_msg.get('msgTime')
             if not message_time:
@@ -164,9 +163,11 @@ class ChzzkChatDownloader(BaseChatDownloader):
         # probably only when server requested to close
         print("### closed ###")
         if not self.event.is_set():
+            # not closed by request, try again
             is_live, _, _ = self.connect_websocket()
             if not is_live:
-                self.event.set()
+                # do not retry if not live
+                self.terminate()
 
     def on_open(self, ws):
         print("Opened connection")
@@ -199,18 +200,10 @@ class ChzzkChatDownloader(BaseChatDownloader):
         return
 
     def connect_websocket(self):
-        # TODO: retry logic
-        live_info = self.get_channel_detail()
-        if not live_info:
-            raise UserNotFound(f'Unable to find Chzzk channel: "{self.live_channel_id}"')
-        is_live = live_info['status'] == self._STATUS_OPEN
-        live_title = live_info['liveTitle']
-        live_id = live_info['liveId']
-        self.chat_channel_id = live_info['chatChannelId']
-        self.server_id = sum([ord(c) for c in self.chat_channel_id]) % 9 + 1
+        is_live, live_id, live_title, chat_channel_id = self.get_channel_detail()
+        self.chat_channel_id = chat_channel_id
+        self.server_id = sum([ord(c) for c in chat_channel_id]) % 9 + 1
         self.access_token = self.get_chat_access_token()
-        if not self.access_token:
-            raise SiteError(f'Unable to get access token of Chzzk: "{self.chat_channel_id}"')
         self.websocket = websocket.WebSocketApp(
             url=f'wss://kr-ss{self.server_id}.chat.naver.com/chat',
             on_open=self.on_open,
@@ -220,18 +213,18 @@ class ChzzkChatDownloader(BaseChatDownloader):
             on_reconnect=self.on_open,
         )
         if self.websocket_thread:
-            self.websocket_thread.stop()
+            self.websocket_thread.join(timeout=self.timeout)
         self.websocket_thread = Thread(
             target=self.websocket.run_forever,
             kwargs=dict(
                 ping_interval=20,
                 ping_payload=orjson.dumps({'ver': '3', 'cmd': ChatCommands.PING}),
             )
-        ).start()
+        )
+        self.websocket_thread.start()
         return is_live, live_id, live_title
 
     def _get_chat_messages_by_channel_id(self):
-        # self.websocket.sock.ping = lambda x, y: x.send(y)
         message_count = 0
         try:
             while not self.event.is_set():
@@ -246,35 +239,35 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 log('debug', f'Total number of messages: {message_count}')
         except Exception as e:
             log('error', e)
-        finally:
-            self.websocket.close()
 
     def _get_chat_by_channel_id(self, match, params):
         return self.get_chat_by_channel_id(match.group('channel_id'), params)
 
     def get_channel_detail(self):
-        live_info = None
-        try:
-            live_info = self._session_get_json(self._LIVE_DETAIL_URL.format(channel_id=self.live_channel_id))['content']
-        except (JSONDecodeError, RequestException) as e:
-            pass
-        return live_info
+        for i in range(self.max_retries):
+            try:
+                live_info = self._session_get_json(self._LIVE_DETAIL_URL.format(channel_id=self.live_channel_id))['content']
+                return live_info['status'] == "OPEN", live_info['liveId'], live_info['liveTitle'], live_info['chatChannelId']
+            except (JSONDecodeError, RequestException) as e:
+                continue
+        raise UserNotFound(f'Unable to find Chzzk channel: "{self.live_channel_id}"')
 
     def get_chat_access_token(self):
-        access_token = None
-        try:
-            access_token_info = self._session_get_json(
-                self._ACCESS_TOKEN_URL.format(chat_channel_id=self.chat_channel_id),
-                cookies=self.cookies
-            )['content']
-            access_token = access_token_info['accessToken']
-        except (JSONDecodeError, RequestException) as e:
-            pass
-        return access_token
+        for i in range(self.max_retries):
+            try:
+                return self._session_get_json(
+                    self._ACCESS_TOKEN_URL.format(chat_channel_id=self.chat_channel_id),
+                    cookies=self.cookies
+                )['content']['accessToken']
+            except (JSONDecodeError, RequestException) as e:
+                continue
+        raise SiteError(f'Unable to get access token of Chzzk: "{self.chat_channel_id}"')
 
-    def terminate(self, signum, frame):
-        print("###### signal received #######")
+    def terminate(self, signum=None, frame=None):
+        print("###### terminate process #######")
         self.event.set()
+        self.websocket.close()
+        self.websocket_thread.join(timeout=self.timeout)
 
     def get_chat_by_channel_id(self, channel_id, params):
         # First function to be called
