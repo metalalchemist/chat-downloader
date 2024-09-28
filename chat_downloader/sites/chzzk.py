@@ -80,6 +80,8 @@ class ChzzkChatDownloader(BaseChatDownloader):
     websocket_thread = None
     timeout = 5
     max_retries = 5
+    proxy_host = None
+    proxy_port = None
 
     def on_message(self, ws, message):
         raw_msg = orjson.loads(message)
@@ -218,7 +220,10 @@ class ChzzkChatDownloader(BaseChatDownloader):
             target=self.websocket.run_forever,
             kwargs=dict(
                 ping_interval=20,
+                # TODO: ping opcode matters?
                 ping_payload=orjson.dumps({'ver': '3', 'cmd': ChatCommands.PING}),
+                http_proxy_host=self.proxy_host,
+                http_proxy_port=self.proxy_port
             )
         )
         self.websocket_thread.start()
@@ -278,6 +283,13 @@ class ChzzkChatDownloader(BaseChatDownloader):
             "NID_AUT": params.get('NID_AUT', self._DEFAULT_NID_AUT),
             "NID_SES": params.get('NID_SES', self._DEFAULT_NID_SES)
         }
+        if self.session.proxies:
+            proxy_full = self.session.proxies.get('https')
+            if proxy_full:
+                proxy_splitted = proxy_full.split(':')
+                self.proxy_host = proxy_splitted[0]
+                self.proxy_port = proxy_splitted[1] if len(proxy_splitted) > 1 else None
+
         print(f'params: {params}')
         signal.signal(signal.SIGINT, self.terminate)
 
