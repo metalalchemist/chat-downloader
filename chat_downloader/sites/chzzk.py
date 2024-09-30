@@ -134,7 +134,11 @@ class ChzzkChatDownloader(BaseChatDownloader):
             if 'profile' not in chat_msg and 'extras' not in chat_msg:
                 continue
 
-            display_name = orjson.loads(chat_msg.get('profile', '{}')).get('nickname', '')
+            profile = chat_msg.get('profile', '{}')
+            if profile is None:
+                display_name = ""
+            else:
+                display_name = orjson.loads(profile).get('nickname', '')
             extras = orjson.loads(chat_msg.get('extras', '{}'))
             emotes = extras.get('emojis')
             pay_amount = extras.get('payAmount')
