@@ -126,7 +126,6 @@ class ChzzkChatDownloader(BaseChatDownloader):
             message = chat_msg.get('msg') or chat_msg.get('content')
             message_type = chat_msg.get('msgTypeCode') or chat_msg.get('messageTypeCode')
             user_id = chat_msg.get('uid') or chat_msg.get('userId')
-            print(f"chat_msg: {chat_msg}")
 
             # System messages
             if message_type in (30, 121,):
@@ -197,9 +196,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
         })
 
     def send_json(self, data):
-        print(f'send: {data}')
         self.websocket.send(orjson.dumps(data))
-        print("send done")
 
     def _get_chat_by_video_id(self, match, params):
         # TODO: vod support
