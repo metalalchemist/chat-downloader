@@ -134,10 +134,12 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 continue
 
             profile = chat_msg.get('profile', '{}')
+            profile_data = {}
             if profile is None:
                 display_name = ""
             else:
-                display_name = orjson.loads(profile).get('nickname', '')
+                profile_data = orjson.loads(profile)
+                display_name = profile_data.get('nickname', '')
             extras = orjson.loads(chat_msg.get('extras', '{}'))
             emotes = extras.get('emojis')
             pay_amount = extras.get('payAmount')
@@ -151,6 +153,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 'author': {
                     'display_name': display_name,
                     'id': user_id,
+                    'subscription': profile_data.get('streamingProperty', {}).get('subscription', None)
                 }
             }
             if emotes:
