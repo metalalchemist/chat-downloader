@@ -694,8 +694,8 @@ class YouTubeChatDownloader(BaseChatDownloader):
         BaseChatDownloader._move_to_dict(info, 'author')
 
         # Sometimes YouTube channels can have no names, so, account for this
-        if 'author' in info and 'name' not in info['author']:
-            info['author']['name'] = ''
+        if 'author' in info and 'display_name' not in info['author']:
+            info['author']['display_name'] = ''
 
         # TODO determine if youtube glitch has occurred
         # round(time_in_seconds/timestamp) == 1
@@ -877,8 +877,7 @@ class YouTubeChatDownloader(BaseChatDownloader):
     _REMAPPING = {
         'id': 'message_id',
         'authorExternalChannelId': 'author_id',
-        'authorName': r('author_name', _get_simple_text),
-        # TODO author_display_name
+        'authorName': r('author_display_name', _get_simple_text),
         'purchaseAmountText': r('money', _parse_currency),
         'message': r(None, _parse_runs, True),
         'timestampText': r('time_text', _get_simple_text),
