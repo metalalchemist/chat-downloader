@@ -226,8 +226,8 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 ping_interval=20,
                 # TODO: ping opcode matters?
                 ping_payload=orjson.dumps({'ver': '3', 'cmd': ChatCommands.PING}),
-                http_proxy_host=self.proxy_host,
-                http_proxy_port=self.proxy_port
+                #http_proxy_host=self.proxy_host,
+                #http_proxy_port=self.proxy_port
             )
         )
         self.websocket_thread.start()
