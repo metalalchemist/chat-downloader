@@ -3,7 +3,7 @@
 from .youtube import YouTubeChatDownloader
 from .twitch import TwitchChatDownloader
 from .chzzk import ChzzkChatDownloader
-from .afreeca import AfreecaChatDownloader
+from .soop import SoopChatDownloader
 from .common import BaseChatDownloader
 
 

@@ -7,27 +7,25 @@ from ..debugging import (
     log,
 )
 import asyncio
-import json
 import queue
 
 from afreeca import AfreecaTV, Chat as AfreecaChat, UserCredential
 from afreeca.exceptions import NotStreamingError
 from datetime import datetime, timezone
 from threading import Thread
-from hashlib import sha256
 
 
-class AfreecaChatDownloader(BaseChatDownloader):
-    _NAME = 'afreecatv.com'
+class SoopChatDownloader(BaseChatDownloader):
+    _NAME = 'sooplive.com'
 
     _SITE_DEFAULT_PARAMS = {
-        'format': 'afreeca',
+        'format': 'sooplive',
     }
 
     _VALID_URLS = {
-        # e.g. 'https://play.afreecatv.com/username'
-        # e.g. 'https://play.afreecatv.com/username/bno/'
-        '_get_chat': r"https?://play\.afreecatv\.com/(?P<username>\w+)(?:/(?P<bno>:\d+))?",
+        # e.g. 'https://play.sooplive.co.kr/username'
+        # e.g. 'https://play.sooplive.co.kr/username/bno/'
+        '_get_chat': r"https?://play\.sooplive\.co\.kr/(?P<username>\w+)(?:/(?P<bno>:\d+))?",
     }
 
     _DEFAULT_ID = 'playsquad'
@@ -36,9 +34,10 @@ class AfreecaChatDownloader(BaseChatDownloader):
     queue = queue.Queue()
 
     async def _chat_callback(self, chat: AfreecaChat):
+        timestamp = int(datetime.now(timezone.utc).timestamp() * 1e6)
         data = {
-            'message_id': '',
-            'timestamp': int(datetime.now(timezone.utc).timestamp() * 1e6),
+            'message_id': f'{chat.sender_id}-{timestamp}',
+            'timestamp': timestamp,
             'message': chat.message,
             'flag': ','.join(chat.flags),
             'author': {
@@ -48,7 +47,6 @@ class AfreecaChatDownloader(BaseChatDownloader):
         }
         if chat.subscription_month:
             data['author']['subscription_month'] = chat.subscription_month
-        data['message_id'] = sha256(json.dumps(data, sort_keys=True).encode('utf8')).hexdigest()
 
         self.queue.put(data)
 
@@ -88,6 +86,7 @@ class AfreecaChatDownloader(BaseChatDownloader):
         return chat
 
     async def close_all_aiohttp_connections(self):
+        log('info', 'Close all SoopChatDownloader connections')
         if self.chat_loader.credential._session:
             await self.chat_loader.credential._session.close()
         if self.chat_loader.session:

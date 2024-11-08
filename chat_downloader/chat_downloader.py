@@ -351,6 +351,7 @@ def run(propagate_interrupt=False, **kwargs):
         chat = downloader.get_chat(**chat_params)
         for message in chat:
             if not message:
+                log('debug', 'not a message...')
                 continue
             log('debug', message)
 

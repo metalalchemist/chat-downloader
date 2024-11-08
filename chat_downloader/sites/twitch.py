@@ -1646,6 +1646,7 @@ class TwitchChatDownloader(BaseChatDownloader):
                     twitch_chat_irc = create_connection()
 
         finally:
+            log('info', 'Close Twitch IRC connection')
             twitch_chat_irc.close_connection()
 
     def _get_chat_by_stream_id(self, match, params):

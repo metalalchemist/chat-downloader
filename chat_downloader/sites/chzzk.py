@@ -1,5 +1,3 @@
-import signal
-
 import orjson
 
 from .common import (
@@ -12,20 +10,17 @@ from ..errors import (
     SiteError
 )
 
-from ..utils.core import (
-    attempts
-)
-
 from ..debugging import (
     log
 )
 
-import websocket
 import queue
 
+from websocket import WebSocketApp
 from requests.exceptions import RequestException
 from json.decoder import JSONDecodeError
-from threading import Event, Thread
+from threading import Thread
+from typing import Optional
 
 
 # NOTE: https://github.com/kimcore/chzzk/blob/main/src/chat/chat.ts
@@ -47,6 +42,18 @@ class ChatCommands:
     BLIND = 94008
     NOTICE = 94010
     PENALTY = 94015
+
+
+class ChatType:
+    TEXT = 1
+    IMAGE = 2
+    STICKER = 3
+    VIDEO = 4
+    RICH = 5
+    DONATION = 10
+    SUBSCRIPTION = 11
+    SYSTEM_MESSAGE = 30
+    SYSTEM_ANNOUNCE = 121
 
 
 class ChzzkChatDownloader(BaseChatDownloader):
@@ -73,21 +80,25 @@ class ChzzkChatDownloader(BaseChatDownloader):
     _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
 
     queue = queue.Queue()
-    event = Event()
+    terminated = False
     chat_channel_id = None
     live_channel_id = None
     cookies = None
-    websocket_thread = None
+    websocket: Optional[WebSocketApp]
+    websocket_thread: Optional[Thread] = None
     timeout = 5
     max_retries = 5
     proxy_host = None
     proxy_port = None
 
     def on_message(self, ws, message):
+        if not message:
+            return
+
         raw_msg = orjson.loads(message)
         cmd = raw_msg.get('cmd')
         if cmd == ChatCommands.CONNECTED:
-            print('connected')
+            log('info', f'Connected to {self.chat_channel_id}...')
             self.sid = raw_msg['bdy']['sid']
             self.send_json({
                 "ver": "3",
@@ -127,33 +138,35 @@ class ChzzkChatDownloader(BaseChatDownloader):
             message_type = chat_msg.get('msgTypeCode') or chat_msg.get('messageTypeCode')
             user_id = chat_msg.get('uid') or chat_msg.get('userId')
 
-            # System messages
-            if message_type in (30, 121,):
+            # Skip system messages
+            if message_type in (ChatType.SYSTEM_MESSAGE, ChatType.SYSTEM_ANNOUNCE,):
+                log('info', f'Skip Chzzk message_type {message_type}: {chat_msg}')
                 continue
             if 'profile' not in chat_msg and 'extras' not in chat_msg:
+                log('info', f'Skip Chzzk message: {chat_msg}')
                 continue
 
-            profile = chat_msg.get('profile', '{}')
-            profile_data = {}
-            if profile is None:
+            profile = orjson.loads(chat_msg.get('profile', '{}'))
+            if not profile:
                 display_name = ""
             else:
-                profile_data = orjson.loads(profile)
-                display_name = profile_data.get('nickname', '')
+                display_name = profile.get('nickname', '')
             extras = orjson.loads(chat_msg.get('extras', '{}'))
             emotes = extras.get('emojis')
             pay_amount = extras.get('payAmount')
+            member_count = chat_msg.get('mbrCnt') or chat_msg.get('memberCount')
 
             data = {
                 'timestamp': message_time * 1000,
-                'message_id': f'{self.chat_channel_id}{user_id}{message_time}',
+                'message_id': f'{user_id}-{message_time}',
                 'message': message,
                 'message_type': str(message_type),
+                'member_count': member_count,
                 'extras': extras,
                 'author': {
                     'display_name': display_name,
                     'id': user_id,
-                    'subscription': profile_data.get('streamingProperty', {}).get('subscription', None)
+                    'subscription': profile.get('streamingProperty', {}).get('subscription', None)
                 }
             }
             if emotes:
@@ -164,13 +177,12 @@ class ChzzkChatDownloader(BaseChatDownloader):
 
     def on_error(self, ws, error):
         # maybe this can be change of cid, retrieve info once more to confirm
-        print("################## WEBSOCKET ERROR ###############################")
-        print(error)
+        log('error', f'Websocket Error: {error}')
 
     def on_close(self, ws, close_status_code, close_msg):
         # probably only when server requested to close
-        print("### closed ###")
-        if not self.event.is_set():
+        log('info', '### Websocket closed ###')
+        if not self.terminated:
             # not closed by request, try again
             is_live, _, _ = self.connect_websocket()
             if not is_live:
@@ -178,7 +190,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 self.terminate()
 
     def on_open(self, ws):
-        print("Opened connection")
+        log('info', 'Opened connection')
         self.send_json({
             "ver": "3",
             "svcid": "game",
@@ -206,11 +218,10 @@ class ChzzkChatDownloader(BaseChatDownloader):
         return
 
     def connect_websocket(self):
-        is_live, live_id, live_title, chat_channel_id = self.get_channel_detail()
-        self.chat_channel_id = chat_channel_id
-        self.server_id = sum([ord(c) for c in chat_channel_id]) % 9 + 1
+        is_live, live_id, live_title, self.chat_channel_id = self.get_channel_detail()
+        self.server_id = sum([ord(c) for c in self.chat_channel_id]) % 9 + 1
         self.access_token = self.get_chat_access_token()
-        self.websocket = websocket.WebSocketApp(
+        self.websocket = WebSocketApp(
             url=f'wss://kr-ss{self.server_id}.chat.naver.com/chat',
             on_open=self.on_open,
             on_message=self.on_message,
@@ -220,14 +231,17 @@ class ChzzkChatDownloader(BaseChatDownloader):
         )
         if self.websocket_thread:
             self.websocket_thread.join(timeout=self.timeout)
+            if self.websocket_thread.is_alive():
+                log('error', 'Websocket ping-pong thread not closed!')
+
         self.websocket_thread = Thread(
             target=self.websocket.run_forever,
             kwargs=dict(
                 ping_interval=20,
                 # TODO: ping opcode matters?
                 ping_payload=orjson.dumps({'ver': '3', 'cmd': ChatCommands.PING}),
-                #http_proxy_host=self.proxy_host,
-                #http_proxy_port=self.proxy_port
+                # http_proxy_host=self.proxy_host,
+                # http_proxy_port=self.proxy_port
             )
         )
         self.websocket_thread.start()
@@ -236,7 +250,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
     def _get_chat_messages_by_channel_id(self):
         message_count = 0
         try:
-            while not self.event.is_set():
+            while True:
                 try:
                     data = self.queue.get(timeout=self.timeout)
                 except queue.Empty:
@@ -246,8 +260,8 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 message_count += 1
                 yield data
                 log('debug', f'Total number of messages: {message_count}')
-        except Exception as e:
-            log('error', e)
+        finally:
+            self.terminate()
 
     def _get_chat_by_channel_id(self, match, params):
         return self.get_chat_by_channel_id(match.group('channel_id'), params)
@@ -272,11 +286,15 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 continue
         raise SiteError(f'Unable to get access token of Chzzk: "{self.chat_channel_id}"')
 
-    def terminate(self, signum=None, frame=None):
-        print("###### terminate process #######")
-        self.event.set()
-        self.websocket.close()
-        self.websocket_thread.join(timeout=self.timeout)
+    def terminate(self):
+        log('info', '###### Terminate ChzzkChatDownloader #######')
+        self.terminated = True
+        if self.websocket:
+            self.websocket.close()
+        if self.websocket_thread:
+            self.websocket_thread.join(timeout=self.timeout)
+            if self.websocket_thread.is_alive():
+                log('error', 'Websocket ping-pong thread not closed!')
 
     def get_chat_by_channel_id(self, channel_id, params):
         # First function to be called
@@ -294,8 +312,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
                 self.proxy_host = proxy_splitted[0]
                 self.proxy_port = proxy_splitted[1] if len(proxy_splitted) > 1 else None
 
-        print(f'params: {params}')
-        signal.signal(signal.SIGINT, self.terminate)
+        log('info', f'params: {params}')
 
         # connect websocket before
         is_live, live_id, live_title = self.connect_websocket()
