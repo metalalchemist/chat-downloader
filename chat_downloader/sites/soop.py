@@ -19,13 +19,13 @@ class SoopChatDownloader(BaseChatDownloader):
     _NAME = 'sooplive.com'
 
     _SITE_DEFAULT_PARAMS = {
-        'format': 'sooplive',
+        'format': 'default',
     }
 
     _VALID_URLS = {
         # e.g. 'https://play.sooplive.co.kr/username'
         # e.g. 'https://play.sooplive.co.kr/username/bno/'
-        '_get_chat': r"https?://play\.sooplive\.co\.kr/(?P<username>\w+)(?:/(?P<bno>:\d+))?",
+        '_get_chat': r"https?://play\.(?:sooplive\.co\.kr|afreecatv\.com)/(?P<username>\w+)(?:/(?P<bno>:\d+))?",
     }
 
     _DEFAULT_ID = 'playsquad'

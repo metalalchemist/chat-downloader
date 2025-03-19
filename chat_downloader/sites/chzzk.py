@@ -72,7 +72,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
     _NAME = 'chzzk.naver.com'
 
     _SITE_DEFAULT_PARAMS = {
-        'format': 'chzzk',
+        'format': 'default',
     }
 
     _VALID_URLS = {
@@ -83,16 +83,13 @@ class ChzzkChatDownloader(BaseChatDownloader):
         '_get_chat_by_video_id': r"https?://chzzk\.naver\.com/video/(?P<video_id>[^/?]+)",
     }
 
+    _ACCESS_TOKEN_URL = "https://comm-api.game.naver.com/nng_main/v1/chats/access-token?channelId={chat_channel_id}&chatType=STREAMING"
     _LIVE_DETAIL_URL = "https://api.chzzk.naver.com/service/v3/channels/{channel_id}/live-detail"
     _VOD_DETAIL_URL = "https://api.chzzk.naver.com/service/v3/videos/{vod_id}"
-    _ACCESS_TOKEN_URL = "https://comm-api.game.naver.com/nng_main/v1/chats/access-token?channelId={chat_channel_id}&chatType=STREAMING"
-
     _VOD_CHAT_URL = "https://api.chzzk.naver.com/service/v1/videos/{vod_id}/chats?playerMessageTime={player_message_time}"
 
     _DEFAULT_NID_AUT = "nVrU5HBws13iBYAnAa5D7bnZrUtp69cn6T+V7BHQIXhHrBexYt9yDBjPS2+YvWdb"
     _DEFAULT_NID_SES = "AAABoWkzOGZj+RIiu6C4Jakp+RdUsaMtRgLbMzO8kh5it7a34ADYVPTvZKtrw9hPNd88WgRjMbyB8+dYw00N+jJckHHo6Q9szDa7Gssw1B7jJF0KiwAi6REeaJa3sdQomN/mdrWEHqvlizYg8cKWaIgCc+evNveEoxcd8zwuRPlSorGWcg09gMPmGwhdFN+eT37sWkCY+gU3W0bbOMUsghZQ/ULUif5+Ghv2fq1gfEukHkbbdiEyRqKuhjjiFn1JNj2cb6Mc+cYBOsZOPFqJ5YuYUVYPKLxg5/jVaH++EmUWgEKonVIlL2f0mjEoIoXYEhwMT4b+iu/xo41IWA35am2RkTLu7rVwSIebVTGLL2W5DAapfUje02SZ+jyl6ynEuhHlHf5994/8IJFerfE2Nh9AhWbECzCRpSTDYaolysKQ/uvUtXxmcuUWCtrUAPZQuXWwE0jtpBUzqZjDFuTMG16EetA0b1K3RrlD2BXut1LlTyfXEyy6UgeoijDnR18X6WvamMT3LieM6Q+QOFI3lhrmYnqUEP+UoYpArIHDtAesgQuKwiai6q1ooIsvtVuAIp6Xdw=="
-
-    _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
 
     queue = queue.Queue()
     terminated = False
@@ -213,7 +210,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
             subscription = None
         else:
             profile = orjson.loads(raw_profile)
-            if type(profile) != dict:
+            if type(profile) is not dict:
                 display_name = ''
                 subscription = None
             else:
@@ -364,7 +361,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
             try:
                 live_info = self._session_get_json(self._LIVE_DETAIL_URL.format(channel_id=self.live_channel_id))['content']
                 return live_info['status'] == "OPEN", live_info['liveId'], live_info['liveTitle'], live_info['chatChannelId']
-            except (JSONDecodeError, RequestException) as e:
+            except (JSONDecodeError, RequestException):
                 continue
         raise UserNotFound(f'Unable to find Chzzk channel: "{self.live_channel_id}"')
 
@@ -375,7 +372,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
                     self._ACCESS_TOKEN_URL.format(chat_channel_id=self.chat_channel_id),
                     cookies=self.cookies
                 )['content']['accessToken']
-            except (JSONDecodeError, RequestException) as e:
+            except (JSONDecodeError, RequestException):
                 continue
         raise SiteError(f'Unable to get access token of Chzzk: "{self.chat_channel_id}"')
 
@@ -416,5 +413,5 @@ class ChzzkChatDownloader(BaseChatDownloader):
             duration=None,
             status='live' if is_live else 'upcoming',  # Always live or upcoming
             video_type='video',
-            id=live_id
+            id=str(live_id)
         )

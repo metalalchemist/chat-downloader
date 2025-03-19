@@ -47,7 +47,6 @@ from ..debugging import (log, debug_log)
 
 from itertools import islice
 import time
-import random
 import re
 import hashlib
 from requests.exceptions import RequestException
@@ -841,7 +840,6 @@ class YouTubeChatDownloader(BaseChatDownloader):
         "﷼": "IRR",
         "៛": "KHR",
         "₽": "RUB",
-        "₪": "ILS",
         "⃀": "KGS",
         "৳": "BDT",
         "₸": "KZT",
@@ -1466,7 +1464,7 @@ class YouTubeChatDownloader(BaseChatDownloader):
 
                 if not yt_initial_data:  # Fatal error
                     log('debug', html)
-                    raise ParsingError(f'Unable to parse initial video data')
+                    raise ParsingError('Unable to parse initial video data')
 
                 cfg = regex_search(html, self._YT_CFG_RE)
                 ytcfg = try_parse_json(cfg, {})
@@ -1499,7 +1497,7 @@ class YouTubeChatDownloader(BaseChatDownloader):
 
         if not player_response_info:
             log('debug', yt_initial_data)
-            log('warning', f'Unable to parse player response, proceeding with caution')
+            log('warning', 'Unable to parse player response, proceeding with caution')
 
         streaming_data = player_response_info.get('streamingData') or {}
         first_format = multi_get(streaming_data, 'adaptiveFormats', 0) or multi_get(
@@ -1733,7 +1731,7 @@ class YouTubeChatDownloader(BaseChatDownloader):
 
         # force_no_timeout = params.get('force_no_timeout')
 
-        max_attempts = params.get('max_attempts')
+        # max_attempts = params.get('max_attempts')
 
         messages_groups_to_add = params.get('message_groups') or []
         messages_types_to_add = params.get('message_types') or []

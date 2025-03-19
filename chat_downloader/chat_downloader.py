@@ -2,7 +2,6 @@
 import sys
 import itertools
 import time
-import json
 
 from urllib.parse import urlparse
 
@@ -16,7 +15,6 @@ from .sites import get_all_sites
 
 from .formatting.format import ItemFormatter
 from .utils.core import (
-    safe_print,
     get_default_args,
     update_dict_without_overwrite
 )
@@ -55,6 +53,7 @@ class ChatDownloader():
                  headers=None,
                  cookies=None,
                  proxy=None,
+                 interface=None,
                  ):
         """Initialise a new session for making requests. Parameters are saved
         and are sent to the relevant constructor when creating a new session.
@@ -68,6 +67,7 @@ class ChatDownloader():
             Pass in an empty string (--proxy "") for direct connection. Defaults
             to None
         :type proxy: str, optional
+        :param interface: Network card interface name to use on HTTP request
         """
 
         self.init_params = locals()

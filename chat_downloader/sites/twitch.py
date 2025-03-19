@@ -30,7 +30,6 @@ from ..debugging import (
 )
 
 import re
-import json
 import time
 import socket
 import base64
@@ -896,14 +895,10 @@ class TwitchChatDownloader(BaseChatDownloader):
         'language': 'language',
         'curator': r('curator', _parse_user),
         'game': r('game', _parse_game),
-        'language': 'language',
         'broadcaster': r('broadcaster', _parse_user),
-
         'thumbnailURL': 'thumbnail_url',
         'createdAt': r('created_at', timestamp_to_microseconds),
         'durationSeconds': 'duration',
-
-
     }
 
     def get_user_clips(self, username, limit=100, filter_by='LAST_WEEK'):

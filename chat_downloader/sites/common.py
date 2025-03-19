@@ -1,5 +1,6 @@
 
 import requests
+import socket
 from http.cookiejar import (MozillaCookieJar, Cookie)
 import os
 import re
@@ -9,7 +10,6 @@ from ..errors import (
     InvalidParameter,
     RetriesExceeded,
     CookieError,
-    UnexpectedError,
     URLNotProvided,
     SiteNotSupported,
     InvalidURL
@@ -424,6 +424,17 @@ class BaseChatDownloader:
 
         # Start a new session
         self.session = requests.Session()
+
+        self.interface = kwargs.get('interface')
+        for adapter in self.session.adapters.values():
+            if not isinstance(adapter, requests.adapters.HTTPAdapter):
+                continue
+            if not self.interface:
+                adapter.poolmanager.connection_pool_kw.pop("socket_options", None)
+            else:
+                options = [(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, self.interface.encode('utf-8'))]
+                # https://docs.python.org/3/library/socket.html#socket.create_connection
+                adapter.poolmanager.connection_pool_kw.update(socket_options=options)
 
         headers = kwargs.get('headers')
         if headers is None:
