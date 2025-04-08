@@ -413,5 +413,5 @@ class ChzzkChatDownloader(BaseChatDownloader):
             duration=None,
             status='live' if is_live else 'upcoming',  # Always live or upcoming
             video_type='video',
-            id=str(live_id)
+            id=f"{live_id}:{self.chat_channel_id}"
         )
