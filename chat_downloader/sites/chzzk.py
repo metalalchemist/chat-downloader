@@ -84,7 +84,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
     }
 
     _ACCESS_TOKEN_URL = "https://comm-api.game.naver.com/nng_main/v1/chats/access-token?channelId={chat_channel_id}&chatType=STREAMING"
-    _LIVE_DETAIL_URL = "https://api.chzzk.naver.com/service/v3/channels/{channel_id}/live-detail"
+    _LIVE_DETAIL_URL = "https://api.chzzk.naver.com/service/v3.1/channels/{channel_id}/live-detail"
     _VOD_DETAIL_URL = "https://api.chzzk.naver.com/service/v3/videos/{vod_id}"
     _VOD_CHAT_URL = "https://api.chzzk.naver.com/service/v1/videos/{vod_id}/chats?playerMessageTime={player_message_time}"
 
@@ -107,44 +107,47 @@ class ChzzkChatDownloader(BaseChatDownloader):
         if not message:
             return
 
-        raw_msg = orjson.loads(message)
-        cmd = raw_msg.get('cmd')
-        if cmd == ChatCommands.CONNECTED:
-            log('info', f'Connected to {self.chat_channel_id}...')
-            self.sid = raw_msg['bdy']['sid']
-            self.send_json({
-                "ver": "3",
-                "svcid": "game",
-                "cid": self.chat_channel_id,
-                "cmd": ChatCommands.REQUEST_RECENT_CHAT,
-                "tid": 2,
-                "sid": self.sid,
-                "bdy": {
-                    'recentMessageCount': 50
-                }
-            })
-            return
-        elif cmd == ChatCommands.PING:
-            self.send_json({'ver': '3', 'cmd': ChatCommands.PONG})
-            return
-        elif cmd == ChatCommands.PONG:
-            return
+        try:
+            raw_msg = orjson.loads(message)
+            cmd = raw_msg.get('cmd')
+            if cmd == ChatCommands.CONNECTED:
+                log('info', f'Connected to {self.chat_channel_id}...')
+                self.sid = raw_msg['bdy']['sid']
+                self.send_json({
+                    "ver": "3",
+                    "svcid": "game",
+                    "cid": self.chat_channel_id,
+                    "cmd": ChatCommands.REQUEST_RECENT_CHAT,
+                    "tid": 2,
+                    "sid": self.sid,
+                    "bdy": {
+                        'recentMessageCount': 50
+                    }
+                })
+                return
+            elif cmd == ChatCommands.PING:
+                self.send_json({'ver': '3', 'cmd': ChatCommands.PONG})
+                return
+            elif cmd == ChatCommands.PONG:
+                return
 
-        if 'bdy' not in raw_msg:
-            return
+            if 'bdy' not in raw_msg:
+                return
 
-        raw_body = raw_msg['bdy']
-        if isinstance(raw_body, list):
-            chat_msgs = raw_body
-        elif isinstance(raw_body, dict):
-            chat_msgs = raw_body.get('messageList', [raw_body])
-        else:
-            log('error', f'Unknown format: {raw_body}')
-            return
+            raw_body = raw_msg['bdy']
+            if isinstance(raw_body, list):
+                chat_msgs = raw_body
+            elif isinstance(raw_body, dict):
+                chat_msgs = raw_body.get('messageList', [raw_body])
+            else:
+                log('error', f'Unknown format: {raw_body}')
+                return
 
-        for chat_msg in chat_msgs:
-            data = self._parse_chat(chat_msg)
-            self.queue.put(data)
+            for chat_msg in chat_msgs:
+                data = self._parse_chat(chat_msg)
+                self.queue.put(data)
+        except Exception as e:
+            log('error', f'Parsing message failed({e}): {message}')
 
     def on_error(self, ws, error):
         # maybe this can be change of cid, retrieve info once more to confirm
@@ -308,33 +311,31 @@ class ChzzkChatDownloader(BaseChatDownloader):
         return
 
     def connect_websocket(self):
-        is_live, live_id, live_title, self.chat_channel_id = self.get_channel_detail()
-        self.server_id = sum([ord(c) for c in self.chat_channel_id]) % 9 + 1
-        self.access_token = self.get_chat_access_token()
-        self.websocket = WebSocketApp(
-            url=f'wss://kr-ss{self.server_id}.chat.naver.com/chat',
-            on_open=self.on_open,
-            on_message=self.on_message,
-            on_error=self.on_error,
-            on_close=self.on_close,
-            on_reconnect=self.on_open,
-        )
-        if self.websocket_thread:
-            self.websocket_thread.join(timeout=self.timeout)
-            if self.websocket_thread.is_alive():
-                log('error', 'Websocket ping-pong thread not closed!')
+        if self.websocket_thread and self.websocket_thread.is_alive():
+            self.websocket.close()
 
-        self.websocket_thread = Thread(
-            target=self.websocket.run_forever,
-            kwargs=dict(
-                ping_interval=20,
-                # TODO: ping opcode matters?
-                ping_payload=orjson.dumps({'ver': '3', 'cmd': ChatCommands.PING}),
-                # http_proxy_host=self.proxy_host,
-                # http_proxy_port=self.proxy_port
+        is_live, live_id, live_title, self.chat_channel_id = self.get_channel_detail()
+        if is_live:
+            self.server_id = sum([ord(c) for c in self.chat_channel_id]) % 9 + 1
+            self.access_token = self.get_chat_access_token()
+            self.websocket = WebSocketApp(
+                url=f'wss://kr-ss{self.server_id}.chat.naver.com/chat',
+                on_open=self.on_open,
+                on_message=self.on_message,
+                on_error=self.on_error,
+                on_close=self.on_close,
+                on_reconnect=self.on_open,
             )
-        )
-        self.websocket_thread.start()
+            self.websocket_thread = Thread(
+                target=self.websocket.run_forever,
+                kwargs=dict(
+                    ping_interval=20,
+                    ping_payload=orjson.dumps({'ver': '3', 'cmd': ChatCommands.PING}),
+                    # http_proxy_host=self.proxy_host,
+                    # http_proxy_port=self.proxy_port
+                )
+            )
+            self.websocket_thread.start()
         return is_live, live_id, live_title
 
     def _get_chat_messages_by_channel_id(self):
@@ -384,7 +385,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
         if self.websocket_thread:
             self.websocket_thread.join(timeout=self.timeout)
             if self.websocket_thread.is_alive():
-                log('error', 'Websocket ping-pong thread not closed!')
+                log('error', 'Websocket thread not closed!')
 
     def get_chat_by_channel_id(self, channel_id, params):
         # First function to be called
