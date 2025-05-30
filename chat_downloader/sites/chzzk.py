@@ -84,7 +84,7 @@ class ChzzkChatDownloader(BaseChatDownloader):
     }
 
     _ACCESS_TOKEN_URL = "https://comm-api.game.naver.com/nng_main/v1/chats/access-token?channelId={chat_channel_id}&chatType=STREAMING"
-    _LIVE_DETAIL_URL = "https://api.chzzk.naver.com/service/v3.1/channels/{channel_id}/live-detail"
+    _LIVE_DETAIL_URL = "https://api.chzzk.naver.com/service/v3.2/channels/{channel_id}/live-detail"
     _VOD_DETAIL_URL = "https://api.chzzk.naver.com/service/v3/videos/{vod_id}"
     _VOD_CHAT_URL = "https://api.chzzk.naver.com/service/v1/videos/{vod_id}/chats?playerMessageTime={player_message_time}"
 
