@@ -21,6 +21,9 @@ requirements = [
     'docstring-parser',
     'colorlog',
     'websocket-client',
+    'aiohttp',
+    'orjson',
+    'typing_extensions',
 ]
 
 setup(
