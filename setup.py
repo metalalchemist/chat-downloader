@@ -21,7 +21,7 @@ requirements = [
     'docstring-parser',
     'colorlog',
     'websocket-client',
-    'afreeca'
+    'afreeca @ git+https://github.com/owsombra/afreeca.git@ec922bdefd8cd00deec931f01021003e225b79af'
 ]
 
 setup(
