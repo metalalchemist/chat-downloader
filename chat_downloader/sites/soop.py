@@ -9,8 +9,8 @@ from ..debugging import (
 import asyncio
 import queue
 
-from afreeca import AfreecaTV, Chat as AfreecaChat, UserCredential
-from afreeca.exceptions import NotStreamingError
+from .afreeca import AfreecaTV, Chat as AfreecaChat, UserCredential
+from .afreeca.exceptions import NotStreamingError
 from datetime import datetime, timezone
 from threading import Thread
 
